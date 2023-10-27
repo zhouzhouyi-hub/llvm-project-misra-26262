@@ -7,29 +7,8 @@ MISRA C rule 6.2 require Single-bit named bit fields shall not be of a signed ty
 
 .. code-block:: c++
 
-struct s {
-        int b1:1;
-};
-
-int main()
-{
-        struct s S;
-        int i;
-        i++;
-}
-
-
-after we invoke clang-tidy -checks='-*,misrac-rule6_2' -fix 6.2.c, we get:
-
-struct s {
-        unsigned int b1:1;
-};
-
-int main()
-{
-        struct s S;
-        int i;
-        i++;
-}
+  struct s {
+    int b1:1;
+  };
 
 
