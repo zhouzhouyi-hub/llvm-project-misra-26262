@@ -163,6 +163,36 @@ New checks
   Flags coroutines that suspend while a lock guard is in scope at the
   suspension point.
 
+- New :doc:`misrac-16.2
+  <clang-tidy/checks/misrac/16.2>` check.
+
+  FIXME: add release notes.
+
+- New :doc:`misrac-6_2
+  <clang-tidy/checks/misrac/6_2>` check.
+
+  FIXME: add release notes.
+
+- New :doc:`misrac-6_2
+  <clang-tidy/checks/misrac/6_2>` check.
+
+  FIXME: add release notes.
+
+- New :doc:`misrac-6_2
+  <clang-tidy/checks/misrac/6_2>` check.
+
+  FIXME: add release notes.
+
+- New :doc:`misrac-rule6_2
+  <clang-tidy/checks/misrac/rule6_2>` check.
+
+  FIXME: add release notes.
+
+- New :doc:`misrac-rule6_2
+  <clang-tidy/checks/misrac/rule6_2>` check.
+
+  FIXME: add release notes.
+
 - New :doc:`modernize-use-constraints
   <clang-tidy/checks/modernize/use-constraints>` check.
 
