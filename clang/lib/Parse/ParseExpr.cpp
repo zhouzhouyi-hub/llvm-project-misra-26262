@@ -221,6 +221,15 @@ ExprResult Parser::ParseConstantExpression() {
   return ParseConstantExpressionInExprEvalContext(NotTypeCast);
 }
 
+ExprResult Parser::ParseArrayBoundExpression() {
+  EnterExpressionEvaluationContext ConstantEvaluated(
+      Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated);
+  // If we parse the bound of a VLA... we parse a non-constant
+  // constant-expression!
+  Actions.ExprEvalContexts.back().InConditionallyConstantEvaluateContext = true;
+  return ParseConstantExpressionInExprEvalContext(NotTypeCast);
+}
+
 ExprResult Parser::ParseCaseExpression(SourceLocation CaseLoc) {
   EnterExpressionEvaluationContext ConstantEvaluated(
       Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated);
@@ -1454,6 +1463,7 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   case tok::kw_vec_step:   // unary-expression: OpenCL 'vec_step' expression
   // unary-expression: '__builtin_omp_required_simd_align' '(' type-name ')'
   case tok::kw___builtin_omp_required_simd_align:
+  case tok::kw___builtin_vectorelements:
     if (NotPrimaryExpression)
       *NotPrimaryExpression = true;
     AllowSuffix = false;
@@ -2093,13 +2103,6 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
       };
       if (OpKind == tok::l_paren || !LHS.isInvalid()) {
         if (Tok.isNot(tok::r_paren)) {
-          // FIXME: arguments in consteval functions are constant expression
-          // regardless of the evaluation context of callsite. However, we
-          // cannot know whether the called function is constevasl before the
-          // declaration is resolved.
-          bool IsRuntimeEvaluated =
-              Actions.ExprEvalContexts.back().IsRuntimeEvaluated;
-          Actions.ExprEvalContexts.back().IsRuntimeEvaluated = false;
           if (ParseExpressionList(ArgExprs, [&] {
                 PreferredType.enterFunctionArgument(Tok.getLocation(),
                                                     RunSignatureHelp);
@@ -2116,8 +2119,6 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
             for (auto &E : ArgExprs)
               Actions.CorrectDelayedTyposInExpr(E);
           }
-          Actions.ExprEvalContexts.back().IsRuntimeEvaluated =
-              IsRuntimeEvaluated;
         }
       }
 
@@ -2336,7 +2337,8 @@ Parser::ParseExprAfterUnaryExprOrTypeTrait(const Token &OpTok,
   assert(OpTok.isOneOf(tok::kw_typeof, tok::kw_typeof_unqual, tok::kw_sizeof,
                        tok::kw___alignof, tok::kw_alignof, tok::kw__Alignof,
                        tok::kw_vec_step,
-                       tok::kw___builtin_omp_required_simd_align) &&
+                       tok::kw___builtin_omp_required_simd_align,
+                       tok::kw___builtin_vectorelements) &&
          "Not a typeof/sizeof/alignof/vec_step expression!");
 
   ExprResult Operand;
@@ -2457,7 +2459,8 @@ ExprResult Parser::ParseSYCLUniqueStableNameExpression() {
 ExprResult Parser::ParseUnaryExprOrTypeTraitExpression() {
   assert(Tok.isOneOf(tok::kw_sizeof, tok::kw___alignof, tok::kw_alignof,
                      tok::kw__Alignof, tok::kw_vec_step,
-                     tok::kw___builtin_omp_required_simd_align) &&
+                     tok::kw___builtin_omp_required_simd_align,
+                     tok::kw___builtin_vectorelements) &&
          "Not a sizeof/alignof/vec_step expression!");
   Token OpTok = Tok;
   ConsumeToken();
@@ -2536,6 +2539,8 @@ ExprResult Parser::ParseUnaryExprOrTypeTraitExpression() {
     ExprKind = UETT_VecStep;
   else if (OpTok.is(tok::kw___builtin_omp_required_simd_align))
     ExprKind = UETT_OpenMPRequiredSimdAlign;
+  else if (OpTok.is(tok::kw___builtin_vectorelements))
+    ExprKind = UETT_VectorElements;
 
   if (isCastExpr)
     return Actions.ActOnUnaryExprOrTypeTraitExpr(OpTok.getLocation(),

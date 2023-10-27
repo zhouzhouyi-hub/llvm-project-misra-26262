@@ -11,6 +11,24 @@
 
 include "mlir/Pass/PassBase.td"
 
+def SparseReinterpretMap : Pass<"sparse-reinterpret-map", "ModuleOp"> {
+  let summary = "Reinterprets sparse tensor type mappings";
+  let description = [{
+    A pass that reinterprets the mappings in all sparse tensor types in a way that
+    enables subsequent sparification. This involves expressing all `linalg.generic`
+    operations in terms of level coordinates (rather than the dimension coordinates
+    of the input tensors) to align the iteration space with the potentially remapped
+    level space as well as resolving cycles in the resulting iteration graphs with
+    explicit sparse tensor conversions where needed.
+  }];
+  let constructor = "mlir::createSparseReinterpretMapPass()";
+  let dependentDialects = [
+    "affine::AffineDialect",
+    "linalg::LinalgDialect",
+    "sparse_tensor::SparseTensorDialect",
+  ];
+}
+
 def PreSparsificationRewrite : Pass<"pre-sparsification-rewrite", "ModuleOp"> {
   let summary = "Applies sparse tensor rewriting rules prior to sparsification";
   let description = [{
@@ -123,6 +141,18 @@ def SparsificationPass : Pass<"sparsification", "ModuleOp"> {
   ];
 }
 
+def StageSparseOperations : Pass<"stage-sparse-ops", "func::FuncOp"> {
+  let summary = "Decompose a complex sparse operation into multiple stages";
+  let description = [{
+    A pass that decomposes a complex sparse operation into multiple stages.
+    E.g., CSR -> CSC is staged into CSR -> COO (unordered) -> sort -> CSC.
+  }];
+  let constructor = "mlir::createStageSparseOperationsPass()";
+  let dependentDialects = [
+    "sparse_tensor::SparseTensorDialect",
+  ];
+}
+
 def PostSparsificationRewrite : Pass<"post-sparsification-rewrite", "ModuleOp"> {
   let summary = "Applies sparse tensor rewriting rules after sparsification";
   let description = [{
@@ -131,6 +161,7 @@ def PostSparsificationRewrite : Pass<"post-sparsification-rewrite", "ModuleOp"> 
   }];
   let constructor = "mlir::createPostSparsificationRewritePass()";
   let dependentDialects = [
+    "affine::AffineDialect",
     "arith::ArithDialect",
     "bufferization::BufferizationDialect",
     "linalg::LinalgDialect",
@@ -188,10 +219,6 @@ def SparseTensorConversionPass : Pass<"sparse-tensor-conversion", "ModuleOp"> {
     "memref::MemRefDialect",
     "scf::SCFDialect",
     "sparse_tensor::SparseTensorDialect",
-  ];
-  let options = [
-    Option<"sparseToSparse", "s2s-strategy", "int32_t", "0",
-           "Set the strategy for sparse-to-sparse conversion">,
   ];
 }
 

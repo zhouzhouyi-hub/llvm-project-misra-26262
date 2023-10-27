@@ -69,7 +69,7 @@ def note_consteval_address_accessible : Note<
   "%select{pointer|reference}0 to a consteval declaration "
   "is not a constant expression">;
 def note_constexpr_uninitialized : Note<
-  "subobject %0 is not initialized">;
+  "subobject %select{of type |}0%1 is not initialized">;
 def note_constexpr_uninitialized_base : Note<
   "constructor of base class %0 is not called">;
 def note_constexpr_static_local : Note<
@@ -394,6 +394,8 @@ def note_constexpr_unsupported_layout : Note<
   "type %0 has unexpected layout">;
 def note_constexpr_unsupported_flexible_array : Note<
   "flexible array initialization is not yet supported">;
+def note_constexpr_non_const_vectorelements : Note<
+  "cannot determine number of elements for sizeless vectors in a constant expression">;
 def err_experimental_clang_interp_failed : Error<
   "the experimental clang interpreter failed to evaluate an expression">;
 
@@ -405,13 +407,18 @@ def warn_fixedpoint_constant_overflow : Warning<
   InGroup<DiagGroup<"fixed-point-overflow">>;
 def warn_constexpr_unscoped_enum_out_of_range : Warning<
   "integer value %0 is outside the valid range of values [%1, %2] for the "
-  "enumeration type %3">, DefaultError, InGroup<DiagGroup<"enum-constexpr-conversion">>;
+  "enumeration type %3">, DefaultError, ShowInSystemHeader, ShowInSystemMacro,
+  InGroup<DiagGroup<"enum-constexpr-conversion">>;
 
 // This is a temporary diagnostic, and shall be removed once our
 // implementation is complete, and like the preceding constexpr notes belongs
 // in Sema.
 def note_unimplemented_constexpr_lambda_feature_ast : Note<
     "unimplemented constexpr lambda feature: %0 (coming soon!)">;
+
+def warn_is_constant_evaluated_always_true_constexpr : Warning<
+  "'%0' will always evaluate to 'true' in a manifestly constant-evaluated expression">,
+  InGroup<DiagGroup<"constant-evaluated">>;
 
 // inline asm related.
 let CategoryName = "Inline Assembly Issue" in {

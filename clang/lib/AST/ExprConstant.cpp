@@ -1945,9 +1945,9 @@ APValue *EvalInfo::createHeapAlloc(const Expr *E, QualType T, LValue &LV) {
 /// Produce a string describing the given constexpr call.
 void CallStackFrame::describe(raw_ostream &Out) const {
   unsigned ArgIndex = 0;
-  bool IsMemberCall = isa<CXXMethodDecl>(Callee) &&
-                      !isa<CXXConstructorDecl>(Callee) &&
-                      cast<CXXMethodDecl>(Callee)->isInstance();
+  bool IsMemberCall =
+      isa<CXXMethodDecl>(Callee) && !isa<CXXConstructorDecl>(Callee) &&
+      cast<CXXMethodDecl>(Callee)->isImplicitObjectMemberFunction();
 
   if (!IsMemberCall)
     Callee->getNameForDiagnostic(Out, Info.Ctx.getPrintingPolicy(),
@@ -2411,10 +2411,15 @@ static bool CheckEvaluationResult(CheckEvaluationResultKind CERK,
                                   const FieldDecl *SubobjectDecl,
                                   CheckedTemporaries &CheckedTemps) {
   if (!Value.hasValue()) {
-    assert(SubobjectDecl && "SubobjectDecl shall be non-null");
-    Info.FFDiag(DiagLoc, diag::note_constexpr_uninitialized) << SubobjectDecl;
-    Info.Note(SubobjectDecl->getLocation(),
-              diag::note_constexpr_subobject_declared_here);
+    if (SubobjectDecl) {
+      Info.FFDiag(DiagLoc, diag::note_constexpr_uninitialized)
+          << /*(name)*/ 1 << SubobjectDecl;
+      Info.Note(SubobjectDecl->getLocation(),
+                diag::note_constexpr_subobject_declared_here);
+    } else {
+      Info.FFDiag(DiagLoc, diag::note_constexpr_uninitialized)
+          << /*of type*/ 0 << Type;
+    }
     return false;
   }
 
@@ -3356,6 +3361,9 @@ static bool evaluateVarDeclInit(EvalInfo &Info, const Expr *E,
     }
     return false;
   }
+
+  if (E->isValueDependent())
+    return false;
 
   // Dig out the initializer, and use the declaration which it's attached to.
   // FIXME: We should eventually check whether the variable has a reachable
@@ -4711,6 +4719,9 @@ static bool EvaluateObjectArgument(EvalInfo &Info, const Expr *Object,
   if (Object->getType()->isLiteralType(Info.Ctx))
     return EvaluateTemporary(Object, This, Info);
 
+  if (Object->getType()->isRecordType() && Object->isPRValue())
+    return EvaluateTemporary(Object, This, Info);
+
   Info.FFDiag(Object, diag::note_constexpr_nonliteral) << Object->getType();
   return false;
 }
@@ -4866,8 +4877,13 @@ static bool HandleBaseToDerivedCast(EvalInfo &Info, const CastExpr *E,
 
 /// Get the value to use for a default-initialized object of type T.
 /// Return false if it encounters something invalid.
-static bool getDefaultInitValue(QualType T, APValue &Result) {
+static bool handleDefaultInitValue(QualType T, APValue &Result) {
   bool Success = true;
+
+  // If there is already a value present don't overwrite it.
+  if (!Result.isAbsent())
+    return true;
+
   if (auto *RD = T->getAsCXXRecordDecl()) {
     if (RD->isInvalidDecl()) {
       Result = APValue();
@@ -4884,13 +4900,14 @@ static bool getDefaultInitValue(QualType T, APValue &Result) {
     for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
                                                   End = RD->bases_end();
          I != End; ++I, ++Index)
-      Success &= getDefaultInitValue(I->getType(), Result.getStructBase(Index));
+      Success &=
+          handleDefaultInitValue(I->getType(), Result.getStructBase(Index));
 
     for (const auto *I : RD->fields()) {
       if (I->isUnnamedBitfield())
         continue;
-      Success &= getDefaultInitValue(I->getType(),
-                                     Result.getStructField(I->getFieldIndex()));
+      Success &= handleDefaultInitValue(
+          I->getType(), Result.getStructField(I->getFieldIndex()));
     }
     return Success;
   }
@@ -4900,7 +4917,7 @@ static bool getDefaultInitValue(QualType T, APValue &Result) {
     Result = APValue(APValue::UninitArray(), 0, AT->getSize().getZExtValue());
     if (Result.hasArrayFiller())
       Success &=
-          getDefaultInitValue(AT->getElementType(), Result.getArrayFiller());
+          handleDefaultInitValue(AT->getElementType(), Result.getArrayFiller());
 
     return Success;
   }
@@ -4941,7 +4958,7 @@ static bool EvaluateVarDecl(EvalInfo &Info, const VarDecl *VD) {
   if (!InitE) {
     if (VD->getType()->isDependentType())
       return Info.noteSideEffect();
-    return getDefaultInitValue(VD->getType(), Val);
+    return handleDefaultInitValue(VD->getType(), Val);
   }
   if (InitE->isValueDependent())
     return false;
@@ -6043,7 +6060,7 @@ struct StartLifetimeOfUnionMemberHandler {
       return false;
     }
     APValue Result;
-    Failed = !getDefaultInitValue(Field->getType(), Result);
+    Failed = !handleDefaultInitValue(Field->getType(), Result);
     Subobj.setUnion(Field, Result);
     return true;
   }
@@ -6395,7 +6412,7 @@ static bool HandleConstructorCall(const Expr *E, const LValue &This,
     for (; !declaresSameEntity(*FieldIt, FD); ++FieldIt) {
       assert(FieldIt != RD->field_end() && "missing field?");
       if (!FieldIt->isUnnamedBitfield())
-        Success &= getDefaultInitValue(
+        Success &= handleDefaultInitValue(
             FieldIt->getType(),
             Result.getStructField(FieldIt->getFieldIndex()));
     }
@@ -6452,7 +6469,8 @@ static bool HandleConstructorCall(const Expr *E, const LValue &This,
             // FIXME: This immediately starts the lifetime of all members of
             // an anonymous struct. It would be preferable to strictly start
             // member lifetime in initialization order.
-            Success &= getDefaultInitValue(Info.Ctx.getRecordType(CD), *Value);
+            Success &=
+                handleDefaultInitValue(Info.Ctx.getRecordType(CD), *Value);
         }
         // Store Subobject as its parent before updating it for the last element
         // in the chain.
@@ -6504,7 +6522,7 @@ static bool HandleConstructorCall(const Expr *E, const LValue &This,
   if (!RD->isUnion()) {
     for (; FieldIt != RD->field_end(); ++FieldIt) {
       if (!FieldIt->isUnnamedBitfield())
-        Success &= getDefaultInitValue(
+        Success &= handleDefaultInitValue(
             FieldIt->getType(),
             Result.getStructField(FieldIt->getFieldIndex()));
     }
@@ -6854,8 +6872,8 @@ static std::optional<DynAlloc *> CheckDeleteKind(EvalInfo &Info, const Expr *E,
     return std::nullopt;
   }
 
-  QualType AllocType = Pointer.Base.getDynamicAllocType();
   if (DeallocKind != (*Alloc)->getKind()) {
+    QualType AllocType = Pointer.Base.getDynamicAllocType();
     Info.FFDiag(E, diag::note_constexpr_new_delete_mismatch)
         << DeallocKind << (*Alloc)->getKind() << AllocType;
     NoteLValueLocation(Info, Pointer.Base);
@@ -7789,15 +7807,18 @@ public:
       if (OCE && OCE->isAssignmentOp()) {
         assert(Args.size() == 2 && "wrong number of arguments in assignment");
         Call = Info.CurrentCall->createCall(FD);
-        if (!EvaluateArgs(isa<CXXMethodDecl>(FD) ? Args.slice(1) : Args, Call,
-                          Info, FD, /*RightToLeft=*/true))
+        bool HasThis = false;
+        if (const auto *MD = dyn_cast<CXXMethodDecl>(FD))
+          HasThis = MD->isImplicitObjectMemberFunction();
+        if (!EvaluateArgs(HasThis ? Args.slice(1) : Args, Call, Info, FD,
+                          /*RightToLeft=*/true))
           return false;
       }
 
       // Overloaded operator calls to member functions are represented as normal
       // calls with '*this' as the first argument.
       const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(FD);
-      if (MD && !MD->isStatic()) {
+      if (MD && MD->isImplicitObjectMemberFunction()) {
         // FIXME: When selecting an implicit conversion for an overloaded
         // operator delete, we sometimes try to evaluate calls to conversion
         // operators without a 'this' parameter!
@@ -7881,7 +7902,7 @@ public:
                                    CovariantAdjustmentPath);
         if (!FD)
           return false;
-      } else {
+      } else if (NamedMember && NamedMember->isImplicitObjectMemberFunction()) {
         // Check that the 'this' pointer points to an object of the right type.
         // FIXME: If this is an assignment operator call, we may need to change
         // the active union member before we check this.
@@ -8361,7 +8382,13 @@ bool LValueExprEvaluator::VisitVarDecl(const Expr *E, const VarDecl *VD) {
 
     if (auto *FD = Info.CurrentCall->LambdaCaptureFields.lookup(VD)) {
       // Start with 'Result' referring to the complete closure object...
-      Result = *Info.CurrentCall->This;
+      if (auto *MD = cast<CXXMethodDecl>(Info.CurrentCall->Callee);
+          MD->isExplicitObjectMemberFunction()) {
+        APValue *RefValue =
+            Info.getParamSlot(Info.CurrentCall->Arguments, MD->getParamDecl(0));
+        Result.setFrom(Info.Ctx, *RefValue);
+      } else
+        Result = *Info.CurrentCall->This;
       // ... then update it to refer to the field of the closure object
       // that represents the capture.
       if (!HandleLValueMember(Info, E, Result, FD))
@@ -9530,6 +9557,8 @@ bool PointerExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
 
     // Figure out how many T's we're copying.
     uint64_t TSize = Info.Ctx.getTypeSizeInChars(T).getQuantity();
+    if (TSize == 0)
+      return false;
     if (!WChar) {
       uint64_t Remainder;
       llvm::APInt OrigN = N;
@@ -9806,7 +9835,7 @@ bool PointerExprEvaluator::VisitCXXNewExpr(const CXXNewExpr *E) {
   } else if (Init) {
     if (!EvaluateInPlace(*Val, Info, Result, Init))
       return false;
-  } else if (!getDefaultInitValue(AllocType, *Val)) {
+  } else if (!handleDefaultInitValue(AllocType, *Val)) {
     return false;
   }
 
@@ -10216,7 +10245,7 @@ bool RecordExprEvaluator::VisitCXXConstructExpr(const CXXConstructExpr *E,
     if (ZeroInit)
       return ZeroInitialization(E, T);
 
-    return getDefaultInitValue(T, Result);
+    return handleDefaultInitValue(T, Result);
   }
 
   const FunctionDecl *Definition = nullptr;
@@ -10969,6 +10998,16 @@ bool ArrayExprEvaluator::VisitArrayInitLoopExpr(const ArrayInitLoopExpr *E) {
 
   bool Success = true;
   for (EvalInfo::ArrayInitLoopIndex Index(Info); Index != Elements; ++Index) {
+    // C++ [class.temporary]/5
+    // There are four contexts in which temporaries are destroyed at a different
+    // point than the end of the full-expression. [...] The second context is
+    // when a copy constructor is called to copy an element of an array while
+    // the entire array is copied [...]. In either case, if the constructor has
+    // one or more default arguments, the destruction of every temporary created
+    // in a default argument is sequenced before the construction of the next
+    // array element, if any.
+    FullExpressionRAII Scope(Info);
+
     if (!EvaluateInPlace(Result.getArrayInitializedElt(Index),
                          Info, Subobject, E->getSubExpr()) ||
         !HandleLValueArrayAdjustment(Info, E, Subobject,
@@ -10977,6 +11016,9 @@ bool ArrayExprEvaluator::VisitArrayInitLoopExpr(const ArrayInitLoopExpr *E) {
         return false;
       Success = false;
     }
+
+    // Make sure we run the destructors too.
+    Scope.destroy();
   }
 
   return Success;
@@ -12178,6 +12220,22 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
   }
 
   case Builtin::BI__builtin_is_constant_evaluated: {
+    const auto *Callee = Info.CurrentCall->getCallee();
+    if (Info.InConstantContext && !Info.CheckingPotentialConstantExpression &&
+        (Info.CallStackDepth == 1 ||
+         (Info.CallStackDepth == 2 && Callee->isInStdNamespace() &&
+          Callee->getIdentifier() &&
+          Callee->getIdentifier()->isStr("is_constant_evaluated")))) {
+      // FIXME: Find a better way to avoid duplicated diagnostics.
+      if (Info.EvalStatus.Diag)
+        Info.report((Info.CallStackDepth == 1)
+                        ? E->getExprLoc()
+                        : Info.CurrentCall->getCallRange().getBegin(),
+                    diag::warn_is_constant_evaluated_always_true_constexpr)
+            << (Info.CallStackDepth == 1 ? "__builtin_is_constant_evaluated"
+                                         : "std::is_constant_evaluated");
+    }
+
     return Success(Info.InConstantContext, E);
   }
 
@@ -13551,6 +13609,20 @@ bool IntExprEvaluator::VisitUnaryExprOrTypeTraitExpr(
                     Info.Ctx.getOpenMPDefaultSimdAlign(E->getArgumentType()))
             .getQuantity(),
         E);
+  case UETT_VectorElements: {
+    QualType Ty = E->getTypeOfArgument();
+    // If the vector has a fixed size, we can determine the number of elements
+    // at compile time.
+    if (Ty->isVectorType())
+      return Success(Ty->castAs<VectorType>()->getNumElements(), E);
+
+    assert(Ty->isSizelessVectorType());
+    if (Info.InConstantContext)
+      Info.CCEDiag(E, diag::note_constexpr_non_const_vectorelements)
+          << E->getSourceRange();
+
+    return false;
+  }
   }
 
   llvm_unreachable("unknown expr/type trait");
@@ -15283,6 +15355,17 @@ static bool FastEvaluateAsRValue(const Expr *Exp, Expr::EvalResult &Result,
     return true;
   }
 
+  if (const auto *CE = dyn_cast<ConstantExpr>(Exp)) {
+    if (CE->hasAPValueResult()) {
+      Result.Val = CE->getAPValueResult();
+      IsConst = true;
+      return true;
+    }
+
+    // The SubExpr is usually just an IntegerLiteral.
+    return FastEvaluateAsRValue(CE->getSubExpr(), Result, Ctx, IsConst);
+  }
+
   // This case should be rare, but we need to check it before we check on
   // the type below.
   if (Exp->getType().isNull()) {
@@ -15584,7 +15667,7 @@ bool VarDecl::evaluateDestruction(
   APValue DestroyedValue;
   if (getEvaluatedValue() && !getEvaluatedValue()->isAbsent())
     DestroyedValue = *getEvaluatedValue();
-  else if (!getDefaultInitValue(getType(), DestroyedValue))
+  else if (!handleDefaultInitValue(getType(), DestroyedValue))
     return false;
 
   if (!EvaluateDestruction(getASTContext(), this, std::move(DestroyedValue),
@@ -16158,8 +16241,7 @@ bool Expr::isIntegerConstantExpr(const ASTContext &Ctx,
 }
 
 std::optional<llvm::APSInt>
-Expr::getIntegerConstantExpr(const ASTContext &Ctx, SourceLocation *Loc,
-                             bool isEvaluated) const {
+Expr::getIntegerConstantExpr(const ASTContext &Ctx, SourceLocation *Loc) const {
   if (isValueDependent()) {
     // Expression evaluator can't succeed on a dependent expression.
     return std::nullopt;
@@ -16256,7 +16338,8 @@ bool Expr::EvaluateWithSubstitution(APValue &Value, ASTContext &Ctx,
 #ifndef NDEBUG
     auto *MD = dyn_cast<CXXMethodDecl>(Callee);
     assert(MD && "Don't provide `this` for non-methods.");
-    assert(!MD->isStatic() && "Don't provide `this` for static methods.");
+    assert(MD->isImplicitObjectMemberFunction() &&
+           "Don't provide `this` for methods without an implicit object.");
 #endif
     if (!This->isValueDependent() &&
         EvaluateObjectArgument(Info, This, ThisVal) &&
@@ -16351,9 +16434,10 @@ bool Expr::isPotentialConstantExpr(const FunctionDecl *FD,
     HandleConstructorCall(&VIE, This, Args, CD, Info, Scratch);
   } else {
     SourceLocation Loc = FD->getLocation();
-    HandleFunctionCall(Loc, FD, (MD && MD->isInstance()) ? &This : nullptr,
-                       &VIE, Args, CallRef(), FD->getBody(), Info, Scratch,
-                       /*ResultSlot=*/nullptr);
+    HandleFunctionCall(
+        Loc, FD, (MD && MD->isImplicitObjectMemberFunction()) ? &This : nullptr,
+        &VIE, Args, CallRef(), FD->getBody(), Info, Scratch,
+        /*ResultSlot=*/nullptr);
   }
 
   return Diags.empty();

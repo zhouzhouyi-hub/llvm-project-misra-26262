@@ -306,7 +306,7 @@ func.func @call_non_llvm() {
 // -----
 
 func.func @call_non_llvm_arg(%arg0 : tensor<*xi32>) {
-  // expected-error@+1 {{'llvm.call' op operand #0 must be LLVM dialect-compatible type}}
+  // expected-error@+1 {{'llvm.call' op operand #0 must be variadic of LLVM dialect-compatible type}}
   "llvm.call"(%arg0) : (tensor<*xi32>) -> ()
   llvm.return
 }
@@ -1410,4 +1410,32 @@ func.func @invalid_zext_target_type(%arg: i32)  {
 func.func @invalid_zext_target_type_two(%arg: vector<1xi32>)  {
   // expected-error@+1 {{input type is a vector but output type is an integer}}
   %0 = llvm.zext %arg : vector<1xi32> to i64
+}
+
+// -----
+
+llvm.func @variadic(...)
+
+llvm.func @invalid_variadic_call(%arg: i32)  {
+  // expected-error@+1 {{missing callee type attribute for vararg call}}
+  "llvm.call"(%arg) <{callee = @variadic}> : (i32) -> ()
+  llvm.return
+}
+
+// -----
+
+llvm.func @variadic(...)
+
+llvm.func @invalid_variadic_call(%arg: i32)  {
+  // expected-error@+1 {{missing callee type attribute for vararg call}}
+  "llvm.call"(%arg) <{callee = @variadic}> : (i32) -> ()
+  llvm.return
+}
+
+// -----
+
+llvm.func @foo(%arg: !llvm.ptr) {
+  // expected-error@+1 {{type '!llvm.ptr' cannot be indexed (index #1)}}
+  %0 = llvm.getelementptr %arg[0, 4] : (!llvm.ptr) -> !llvm.ptr, !llvm.ptr
+  llvm.return
 }

@@ -219,10 +219,8 @@ defvar FPListW = [SCALAR_F16, SCALAR_F32];
 defvar BFPListW = [SCALAR_BF16];
 
 class NFSet<LMULInfo m> {
-  list<int> L = !cond(!eq(m.value, V_M8.value): [],
-                      !eq(m.value, V_M4.value): [2],
-                      !eq(m.value, V_M2.value): [2, 3, 4],
-                      true: [2, 3, 4, 5, 6, 7, 8]);
+  defvar lmul = !shl(1, m.value);
+  list<int> L = NFList<lmul>.L;
 }
 
 class octuple_to_str<int octuple> {
@@ -7453,10 +7451,6 @@ defm : VPatBinaryV_VV_INT_EEW<"int_riscv_vrgatherei16_vv", "PseudoVRGATHEREI16",
 // 16.5. Vector Compress Instruction
 //===----------------------------------------------------------------------===//
 defm : VPatUnaryV_V_AnyMask<"int_riscv_vcompress", "PseudoVCOMPRESS", AllIntegerVectors>;
-defm : VPatUnaryV_V_AnyMask<"int_riscv_vcompress", "PseudoVCOMPRESS", AllIntegerVectors>;
-defm : VPatUnaryV_V_AnyMask<"int_riscv_vcompress", "PseudoVCOMPRESS", AllIntegerVectors>;
-defm : VPatUnaryV_V_AnyMask<"int_riscv_vcompress", "PseudoVCOMPRESS", AllFloatVectors>;
-defm : VPatUnaryV_V_AnyMask<"int_riscv_vcompress", "PseudoVCOMPRESS", AllFloatVectors>;
 defm : VPatUnaryV_V_AnyMask<"int_riscv_vcompress", "PseudoVCOMPRESS", AllFloatVectors>;
 
 // Include the non-intrinsic ISel patterns

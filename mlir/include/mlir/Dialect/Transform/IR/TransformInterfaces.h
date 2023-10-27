@@ -95,11 +95,23 @@ public:
     return *this;
   }
 
+  // Ensures that only a single top-level transform op is present in the IR.
+  TransformOptions &enableEnforceSingleToplevelTransformOp(bool enable = true) {
+    enforceSingleToplevelTransformOp = enable;
+    return *this;
+  }
+
   /// Returns true if the expensive checks are requested.
   bool getExpensiveChecksEnabled() const { return expensiveChecksEnabled; }
 
+  // Returns true if enforcing a single top-level transform op is requested.
+  bool getEnforceSingleToplevelTransformOp() const {
+    return enforceSingleToplevelTransformOp;
+  }
+
 private:
   bool expensiveChecksEnabled = true;
+  bool enforceSingleToplevelTransformOp = true;
 };
 
 /// Entry point to the Transform dialect infrastructure. Applies the
@@ -111,7 +123,8 @@ private:
 LogicalResult
 applyTransforms(Operation *payloadRoot, TransformOpInterface transform,
                 const RaggedArray<MappedValue> &extraMapping = {},
-                const TransformOptions &options = TransformOptions());
+                const TransformOptions &options = TransformOptions(),
+                bool enforceToplevelTransformOp = true);
 
 /// The state maintained across applications of various ops implementing the
 /// TransformOpInterface. The operations implementing this interface and the
@@ -193,7 +206,7 @@ private:
 
   friend LogicalResult applyTransforms(Operation *, TransformOpInterface,
                                        const RaggedArray<MappedValue> &,
-                                       const TransformOptions &);
+                                       const TransformOptions &, bool);
 
   friend TransformState
   detail::makeTransformStateForTesting(Region *region, Operation *payloadRoot);
@@ -617,7 +630,11 @@ private:
   /// Forgets the payload IR ops associated with the given transform IR value,
   /// as well as any association between value handles and the results of said
   /// payload IR op.
-  void forgetMapping(Value opHandle, ValueRange origOpFlatResults);
+  ///
+  /// If `allowOutOfScope` is set to "false", asserts that the handle is in
+  /// scope, based on the current stack of frames.
+  void forgetMapping(Value opHandle, ValueRange origOpFlatResults,
+                     bool allowOutOfScope = false);
 
   void forgetValueMapping(Value valueHandle,
                           ArrayRef<Operation *> payloadOperations);
