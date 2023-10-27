@@ -173,28 +173,17 @@ New checks
   Flags coroutines that suspend while a lock guard is in scope at the
   suspension point.
 
--
-
 - New :doc:`misrac-6_2
-  <clang-tidy/checks/misrac/6_2>` check.
-
-  FIXME: add release notes.
-
-- New :doc:`misrac-6_2
-  <clang-tidy/checks/misrac/6_2>` check.
-
-  FIXME: add release notes.
-
-- New :doc:`misrac-6_2
-  <clang-tidy/checks/misrac/6_2>` check.
-
-  FIXME: add release notes.
-
-
-  points in a coroutine. Such hostile types include scoped-lockable types and
   <clang-tidy/checks/misrac/rule6_2>` check.
 
-  FIXME: add release notes.
+  According to Misra C rule 6.2, fix Single-bit named bit fields shall not be of a signed type.
+  
+- New :doc:`misc-coroutine-hostile-raii
+  <clang-tidy/checks/misc/coroutine-hostile-raii>` check.
+
+  Detects when objects of certain hostile RAII types persists across suspension
+  points in a coroutine. Such hostile types include scoped-lockable types and
+  types belonging to a configurable denylist.
 
 - New :doc:`modernize-use-constraints
   <clang-tidy/checks/modernize/use-constraints>` check.
