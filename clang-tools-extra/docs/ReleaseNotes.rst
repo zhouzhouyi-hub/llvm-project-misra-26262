@@ -185,6 +185,11 @@ New checks
   points in a coroutine. Such hostile types include scoped-lockable types and
   types belonging to a configurable denylist.
 
+- New :doc:`misrac-rule17_7
+  <clang-tidy/checks/misrac/rule17_7>` check.
+
+  FIXME: add release notes.
+
 - New :doc:`modernize-use-constraints
   <clang-tidy/checks/modernize/use-constraints>` check.
 

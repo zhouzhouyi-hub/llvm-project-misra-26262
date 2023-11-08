@@ -9,6 +9,7 @@
 #include "../ClangTidy.h"
 #include "../ClangTidyModule.h"
 #include "../ClangTidyModuleRegistry.h"
+#include "Rule17_7Check.h"
 
 #include "Rule6_2Check.h"
 #include "Rule6_2Check.h"
@@ -27,6 +28,8 @@ public:
     /*CheckFactories.registerCheck<MustCheckErrsCheck>(
       "Misra C");*/
 
+    CheckFactories.registerCheck<Rule17_7Check>(
+        "misrac-rule17_7");
     CheckFactories.registerCheck<Rule6_2Check>(
         "misrac-rule6_2");
   }
